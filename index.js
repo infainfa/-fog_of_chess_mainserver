@@ -4,8 +4,9 @@ const { Chess } = require('chess.js');
 const { FogEngine } = require('./fogEngine');
 
 const httpServer = createServer();
-const io = new Server(httpServer, { cors: { origin: '*' } });
-
+const io = new Server(httpServer, { 
+  cors: { origin: 'https://chess-fog-client.vercel.app' } 
+});
 const games = new Map();
 let waitingPlayer = null;
 

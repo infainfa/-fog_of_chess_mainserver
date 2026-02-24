@@ -93,31 +93,64 @@ function kingExists(chess, color) {
 
 // Виконує хід навіть якщо chess.js блокує через шах
 function forceMove(chess, from, to, promotion) {
-  // Спочатку звичайний спосіб
+  // Спробуємо звичайний спосіб
   try {
     const m = chess.move({ from, to, promotion: promotion || 'q' });
     if (m) return m;
   } catch {}
 
-  // Якщо заблокований через шах — міняємо turn в FEN
-  const fenParts = chess.fen().split(' ');
-  const realTurn = fenParts[1]; // хто зараз ходить (w або b)
-  fenParts[1]    = realTurn === 'w' ? 'b' : 'w'; // робимо вигляд що ходить суперник
+  // chess.js блокує через шах — маніпулюємо FEN напряму
+  const board    = chess.board();
+  const fen      = chess.fen();
+  const parts    = fen.split(' ');
+  const turn     = parts[1];
+  const FILES    = ['a','b','c','d','e','f','g','h'];
+  const fromFile = FILES.indexOf(from[0]);
+  const fromRank = parseInt(from[1]) - 1;
+  const toFile   = FILES.indexOf(to[0]);
+  const toRank   = parseInt(to[1]) - 1;
+
+  const newBoard = board.map(row => [...row]);
+  const movedPiece = newBoard[7 - fromRank][fromFile];
+  if (!movedPiece) return null;
+
+  newBoard[7 - fromRank][fromFile] = null;
+
+  // Промоція пішака
+  if (movedPiece.type === 'p' && (toRank === 7 || toRank === 0)) {
+    newBoard[7 - toRank][toFile] = { type: promotion || 'q', color: movedPiece.color };
+  } else {
+    newBoard[7 - toRank][toFile] = { ...movedPiece };
+  }
+
+  // Дошка -> FEN рядок
+  const fenRows = newBoard.map(row => {
+    let s = ''; let empty = 0;
+    for (const cell of row) {
+      if (!cell) { empty++; }
+      else {
+        if (empty > 0) { s += empty; empty = 0; }
+        s += cell.color === 'w' ? cell.type.toUpperCase() : cell.type;
+      }
+    }
+    if (empty > 0) s += empty;
+    return s;
+  }).join('/');
+
+  const newTurn   = turn === 'w' ? 'b' : 'w';
+  const halfMove  = movedPiece.type === 'p' ? '0' : String(parseInt(parts[4] || '0') + 1);
+  const fullMove  = turn === 'b' ? String(parseInt(parts[5] || '1') + 1) : (parts[5] || '1');
+  const newFen    = `${fenRows} ${newTurn} - - ${halfMove} ${fullMove}`;
 
   try {
-    const temp = new Chess(fenParts.join(' '));
-    const m    = temp.move({ from, to, promotion: promotion || 'q' });
-    if (!m) return null;
-    // Після ходу в temp — turn вже переключився правильно (на наступного гравця)
-    // temp.fen() вже має правильний turn — просто завантажуємо
-    chess.load(temp.fen());
+    chess.load(newFen);
+    console.log(`[forceMove ok] ${from}->${to} newTurn=${newTurn}`);
     return { from, to };
   } catch(e) {
-    console.error('forceMove failed:', e.message);
+    console.error('[forceMove] load failed:', e.message, newFen);
     return null;
   }
 }
-
 io.on('connection', (socket) => {
   console.log(`[+] ${socket.id}`);
 

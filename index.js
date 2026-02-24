@@ -9,11 +9,6 @@ const io = new Server(httpServer, { cors: { origin: '*' } });
 const games = new Map();
 let waitingPlayer = null;
 
-// ═══════════════════════════════════════════════════════════════
-// Власний генератор ходів — ігнорує правило шаху
-// Перемога = взяття короля суперника
-// ═══════════════════════════════════════════════════════════════
-
 const FILES = ['a','b','c','d','e','f','g','h'];
 const DIRS = {
   r: [[1,0],[-1,0],[0,1],[0,-1]],
@@ -25,9 +20,10 @@ const DIRS = {
 
 function sq(f, r) { return FILES[f] + (r + 1); }
 
-// Повертає всі фізично можливі ходи БЕЗ перевірки шаху
 function getAllMoves(chess, color) {
   const moves = [];
+  const epSquare = chess.fen().split(' ')[3];
+
   for (let rank = 0; rank < 8; rank++) {
     for (let file = 0; file < 8; file++) {
       const square = sq(file, rank);
@@ -53,8 +49,7 @@ function getAllMoves(chess, color) {
               const diag   = sq(ff, r1);
               const target = chess.get(diag);
               if (target && target.color !== color) moves.push({ from: square, to: diag });
-              const ep = chess.fen().split(' ')[3];
-              if (ep && ep !== '-' && ep === diag) moves.push({ from: square, to: diag });
+              if (epSquare && epSquare !== '-' && epSquare === diag) moves.push({ from: square, to: diag });
             }
           }
         }
@@ -91,66 +86,80 @@ function kingExists(chess, color) {
   return false;
 }
 
-// Виконує хід навіть якщо chess.js блокує через шах
-function forceMove(chess, from, to, promotion) {
-  // Спробуємо звичайний спосіб
+// Виконує хід напряму через FEN — chess.js не може заблокувати
+function applyMove(chess, from, to, promotion) {
+  // Спочатку пробуємо через chess.js (швидше і точніше)
   try {
     const m = chess.move({ from, to, promotion: promotion || 'q' });
-    if (m) return m;
+    if (m) return true;
   } catch {}
 
-  // chess.js блокує через шах — маніпулюємо FEN напряму
-  const board    = chess.board();
-  const fen      = chess.fen();
-  const parts    = fen.split(' ');
-  const turn     = parts[1];
-  const FILES    = ['a','b','c','d','e','f','g','h'];
+  // Якщо заблоковано через шах — будуємо новий FEN вручну
+  const board = chess.board(); // [rank8..rank1][file a..h]
+  const fenParts = chess.fen().split(' ');
+  const turn = fenParts[1];
+
   const fromFile = FILES.indexOf(from[0]);
-  const fromRank = parseInt(from[1]) - 1;
+  const fromRank = parseInt(from[1]) - 1; // 0=rank1, 7=rank8
   const toFile   = FILES.indexOf(to[0]);
   const toRank   = parseInt(to[1]) - 1;
 
-  const newBoard = board.map(row => [...row]);
-  const movedPiece = newBoard[7 - fromRank][fromFile];
-  if (!movedPiece) return null;
-
-  newBoard[7 - fromRank][fromFile] = null;
-
-  // Промоція пішака
-  if (movedPiece.type === 'p' && (toRank === 7 || toRank === 0)) {
-    newBoard[7 - toRank][toFile] = { type: promotion || 'q', color: movedPiece.color };
-  } else {
-    newBoard[7 - toRank][toFile] = { ...movedPiece };
+  // board[0] = rank8, board[7] = rank1
+  // тому board index = 7 - rank
+  const piece = board[7 - fromRank][fromFile];
+  if (!piece) {
+    console.error('[applyMove] no piece at', from);
+    return false;
   }
 
-  // Дошка -> FEN рядок
-  const fenRows = newBoard.map(row => {
-    let s = ''; let empty = 0;
+  // Копіюємо дошку
+  const nb = board.map(row => row.map(p => p ? { ...p } : null));
+  nb[7 - fromRank][fromFile] = null;
+
+  // Промоція
+  if (piece.type === 'p' && (toRank === 7 || toRank === 0)) {
+    nb[7 - toRank][toFile] = { type: promotion || 'q', color: piece.color, square: to };
+  } else {
+    nb[7 - toRank][toFile] = { ...piece, square: to };
+  }
+
+  // En passant — видаляємо взятого пішака
+  const ep = fenParts[3];
+  if (piece.type === 'p' && ep && ep !== '-' && ep === to) {
+    const epRank = turn === 'w' ? toRank - 1 : toRank + 1;
+    nb[7 - epRank][toFile] = null;
+  }
+
+  // Будуємо FEN рядок позиції
+  const pos = nb.map(row => {
+    let s = ''; let e = 0;
     for (const cell of row) {
-      if (!cell) { empty++; }
+      if (!cell) { e++; }
       else {
-        if (empty > 0) { s += empty; empty = 0; }
+        if (e) { s += e; e = 0; }
         s += cell.color === 'w' ? cell.type.toUpperCase() : cell.type;
       }
     }
-    if (empty > 0) s += empty;
+    if (e) s += e;
     return s;
   }).join('/');
 
-  const newTurn   = turn === 'w' ? 'b' : 'w';
-  const halfMove  = movedPiece.type === 'p' ? '0' : String(parseInt(parts[4] || '0') + 1);
-  const fullMove  = turn === 'b' ? String(parseInt(parts[5] || '1') + 1) : (parts[5] || '1');
-  const newFen    = `${fenRows} ${newTurn} - - ${halfMove} ${fullMove}`;
+  const newTurn  = turn === 'w' ? 'b' : 'w';
+  const half     = piece.type === 'p' || nb[7-toRank][toFile] ? '0' : String(parseInt(fenParts[4] || '0') + 1);
+  const full     = turn === 'b' ? String(parseInt(fenParts[5] || '1') + 1) : fenParts[5] || '1';
+  const newFen   = `${pos} ${newTurn} - - ${half} ${full}`;
+
+  console.log(`[applyMove forced] ${from}->${to} FEN: ${newFen}`);
 
   try {
     chess.load(newFen);
-    console.log(`[forceMove ok] ${from}->${to} newTurn=${newTurn}`);
-    return { from, to };
+    return true;
   } catch(e) {
-    console.error('[forceMove] load failed:', e.message, newFen);
-    return null;
+    console.error('[applyMove] chess.load failed:', e.message, '| FEN:', newFen);
+    return false;
   }
 }
+
 io.on('connection', (socket) => {
   console.log(`[+] ${socket.id}`);
 
@@ -189,16 +198,16 @@ io.on('connection', (socket) => {
     if (socket.id !== (currentTurn === 'w' ? players.white : players.black))
       return socket.emit('error', { message: 'Not your turn' });
 
-    // Валідуємо через власний генератор (без перевірки шаху)
+    // Валідуємо без перевірки шаху
     const allMoves = getAllMoves(chess, currentTurn);
     const isValid  = allMoves.some(m => m.from === from && m.to === to);
-    console.log(`[move] ${from}->${to} turn=${currentTurn} valid=${isValid} fen=${chess.fen()}`);
+    console.log(`[move] ${from}->${to} turn=${currentTurn} valid=${isValid}`);
     if (!isValid) return socket.emit('error', { message: 'Invalid move' });
 
-    // Виконуємо хід (форсуємо якщо chess.js блокує)
-    const move = forceMove(chess, from, to, promotion);
-    console.log(`[after move] result=${JSON.stringify(move)} newFen=${chess.fen()}`);
-    if (!move) return socket.emit('error', { message: 'Move failed' });
+    // Виконуємо хід
+    const ok = applyMove(chess, from, to, promotion);
+    console.log(`[after move] ok=${ok} newFen=${chess.fen()}`);
+    if (!ok) return socket.emit('error', { message: 'Move failed' });
 
     // Перемога = король суперника взятий
     const opponentColor = currentTurn === 'w' ? 'b' : 'w';
@@ -209,7 +218,7 @@ io.on('connection', (socket) => {
     const winner        = kingCaptured ? (currentTurn === 'w' ? 'white' : 'black') : null;
 
     const base = {
-      move:        { from: move.from || from, to: move.to || to },
+      move:        { from, to },
       turn:        chess.turn() === 'w' ? 'white' : 'black',
       isGameOver,
       isCheckmate: kingCaptured,

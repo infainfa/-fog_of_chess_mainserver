@@ -101,17 +101,16 @@ function forceMove(chess, from, to, promotion) {
 
   // Якщо заблокований через шах — міняємо turn в FEN
   const fenParts = chess.fen().split(' ');
-  const realTurn = fenParts[1];
-  fenParts[1]    = realTurn === 'w' ? 'b' : 'w';
+  const realTurn = fenParts[1]; // хто зараз ходить (w або b)
+  fenParts[1]    = realTurn === 'w' ? 'b' : 'w'; // робимо вигляд що ходить суперник
 
   try {
     const temp = new Chess(fenParts.join(' '));
     const m    = temp.move({ from, to, promotion: promotion || 'q' });
     if (!m) return null;
-    // Відновлюємо правильний turn і вантажимо
-    const newFen = temp.fen().split(' ');
-    newFen[1] = realTurn === 'w' ? 'b' : 'w';
-    chess.load(newFen.join(' '));
+    // Після ходу в temp — turn вже переключився правильно (на наступного гравця)
+    // temp.fen() вже має правильний turn — просто завантажуємо
+    chess.load(temp.fen());
     return { from, to };
   } catch(e) {
     console.error('forceMove failed:', e.message);

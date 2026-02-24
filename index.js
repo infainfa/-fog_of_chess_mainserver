@@ -159,10 +159,12 @@ io.on('connection', (socket) => {
     // Валідуємо через власний генератор (без перевірки шаху)
     const allMoves = getAllMoves(chess, currentTurn);
     const isValid  = allMoves.some(m => m.from === from && m.to === to);
+    console.log(`[move] ${from}->${to} turn=${currentTurn} valid=${isValid} fen=${chess.fen()}`);
     if (!isValid) return socket.emit('error', { message: 'Invalid move' });
 
     // Виконуємо хід (форсуємо якщо chess.js блокує)
     const move = forceMove(chess, from, to, promotion);
+    console.log(`[after move] result=${JSON.stringify(move)} newFen=${chess.fen()}`);
     if (!move) return socket.emit('error', { message: 'Move failed' });
 
     // Перемога = король суперника взятий

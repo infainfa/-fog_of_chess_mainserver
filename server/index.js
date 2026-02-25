@@ -109,6 +109,10 @@ function kingExists(chess, color) {
 
 // Виконує хід — спочатку через chess.js, при блокуванні через шах — через FEN
 function applyMove(chess, from, to, promotion) {
+  // Визначаємо чи це рокіровка ДО спроби chess.js
+  // щоб знати як обробляти якщо chess.js заблокує
+  const isCastling = chess.get(from)?.type === 'k' && Math.abs(FILES.indexOf(to[0]) - FILES.indexOf(from[0])) === 2;
+
   // chess.js вміє рокіровку і en passant — пробуємо спочатку
   try {
     const m = chess.move({ from, to, promotion: promotion || 'q' });
@@ -135,6 +139,20 @@ function applyMove(chess, from, to, promotion) {
     nb[7 - toRank][toFile] = { type: promotion || 'q', color: piece.color };
   } else {
     nb[7 - toRank][toFile] = { ...piece };
+  }
+
+  // Рокіровка — переміщуємо туру вручну
+  if (isCastling) {
+    const kr = turn === 'w' ? 0 : 7;
+    if (toFile === 6) {
+      // Коротка: тура h→f
+      nb[7 - kr][5] = nb[7 - kr][7];
+      nb[7 - kr][7] = null;
+    } else if (toFile === 2) {
+      // Довга: тура a→d
+      nb[7 - kr][3] = nb[7 - kr][0];
+      nb[7 - kr][0] = null;
+    }
   }
 
   // En passant

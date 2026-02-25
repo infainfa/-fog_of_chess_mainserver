@@ -298,4 +298,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => console.log(`♟ Chess server :${PORT}`)); 
+httpServer.listen(PORT, () => console.log(`♟ Chess server :${PORT} [v3-castling-fix]`));
